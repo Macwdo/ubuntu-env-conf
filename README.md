@@ -35,6 +35,8 @@ snap install discord
 ```
 sudo apt install zsh git wget curl
 ```
+# Using ZSH
+chsh -s $(which zsh)
 
 # Installing  Oh my zsh
 ```
