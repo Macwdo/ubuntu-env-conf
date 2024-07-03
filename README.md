@@ -53,7 +53,7 @@ git clone https://github.com/zsh-users/zsh-syntax-highlighting.git $ZSH_CUSTOM/p
 
 # Asdf plugin
 ```
-https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/asdf
+git clone https://github.com/asdf-vm/asdf.git ~/.asdf
 ```
 
 # Add oh my zsh plugins
