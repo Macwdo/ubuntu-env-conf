@@ -94,13 +94,17 @@ https://www.jetbrains.com/pt-br/lp/mono/
 https://docs.docker.com/engine/install/ubuntu/
 
 # Install Rust and tools
+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+\
 cargo install exa bat
 
 # Bash Top
 
 https://github.com/aristocratos/bashtop
 
+# Gnome tweaks and extensions
 
+https://www.baeldung.com/linux/gnome-shell-extension
 
 
