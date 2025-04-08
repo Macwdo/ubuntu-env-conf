@@ -75,3 +75,9 @@ To run the setup and tests, simply execute:
 Download the updated README file below:
 [Download README.md](./Readme.md)
 
+
+# TODO
+- [] Add Terraform
+- [] Add Kubernetes (Think about it in WSL 2 Environment)
+- [] Fix Script Duplication when set .zshrc plugins
+- [] Add Tests.
