@@ -85,3 +85,4 @@ Download the updated README file below:
 - [] Add Kubernetes (Think about it in WSL 2 Environment)
 - [] Fix Script Duplication when set .zshrc plugins
 - [] Add Tests.
+- [] Add Aws Cli
