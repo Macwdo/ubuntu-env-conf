@@ -75,6 +75,10 @@ To run the setup and tests, simply execute:
 Download the updated README file below:
 [Download README.md](./Readme.md)
 
+# Fixes
+- [] Lazydocker was not installed correctly. 
+- [] The rust binary is just added after opening a new terminal. So the test fails.
+
 
 # TODO
 - [] Add Terraform
