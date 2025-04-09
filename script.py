@@ -33,8 +33,8 @@ def update_upgrade():
     logg("Starting update and upgrade of packages...", BLUE)
     try:
         # Check if apt update/upgrade are needed (could parse output, for now always run)
-        run_command("sudo apt update -y")
-        run_command("sudo apt upgrade -y")
+        run_command("apt update -y")
+        run_command("apt upgrade -y")
         logg("Packages updated and upgraded successfully.", GREEN)
     except Exception as e:
         logg(f"Error during update/upgrade: {e}", RED)
@@ -49,7 +49,7 @@ def install_packages():
     )
     try:
         # We could check if dpkg -l shows these packages but here we assume idempotence
-        run_command(f"sudo apt install -y {apt_packages}")
+        run_command(f"apt install -y {apt_packages}")
         logg("Essential packages installed successfully.", GREEN)
     except Exception as e:
         logg(f"Error installing essential packages: {e}", RED)
@@ -58,7 +58,7 @@ def install_packages():
 def install_basic_tools():
     logg("Starting installation of basic tools...", BLUE)
     try:
-        run_command("sudo apt install -y zsh git wget curl unzip")
+        run_command("apt install -y zsh git wget curl unzip")
         logg("Basic tools installed successfully.", GREEN)
     except Exception as e:
         logg(f"Error installing basic tools: {e}", RED)
@@ -207,9 +207,9 @@ def install_docker():
     logg("Starting installation of Docker...", BLUE)
     try:
         # A deeper check could be done (e.g. check if docker daemon is running)
-        run_command("sudo apt install -y docker.io")
-        run_command("sudo systemctl enable --now docker")
-        run_command("sudo usermod -aG docker $USER")
+        run_command("apt install -y docker.io")
+        run_command("systemctl enable --now docker")
+        run_command("usermod -aG docker $USER")
         logg(
             "Docker installed successfully. Please log out/in to apply changes.", GREEN
         )
@@ -224,7 +224,7 @@ def install_aws_cli():
             'curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"'
         )
         run_command("unzip awscliv2.zip")
-        run_command("sudo ./aws/install")
+        run_command("./aws/install")
         run_command("rm awscliv2.zip")
         run_command("rm -rf aws")
         logg("AWS CLI installed successfully.", GREEN)
@@ -270,8 +270,8 @@ def install_uv():
 def install_node_pnpm():
     logg("Starting installation of Node.js, npm, and pnpm...", BLUE)
     try:
-        run_command("sudo apt install -y nodejs npm")
-        run_command("sudo npm install -g pnpm")
+        run_command("apt install -y nodejs npm")
+        run_command("npm install -g pnpm")
         logg("Node.js, npm, and pnpm installed successfully.", GREEN)
     except Exception as e:
         logg(f"Error installing Node.js, npm, or pnpm: {e}", RED)
@@ -280,7 +280,7 @@ def install_node_pnpm():
 def install_golang():
     logg("Starting installation of Golang...", BLUE)
     try:
-        run_command("sudo apt install -y golang-go")
+        run_command("apt install -y golang-go")
         logg("Golang installed successfully.", GREEN)
     except Exception as e:
         logg(f"Error installing Golang: {e}", RED)
@@ -289,7 +289,7 @@ def install_golang():
 def install_btop():
     logg("Starting installation of btop...", BLUE)
     try:
-        run_command("sudo apt install -y btop")
+        run_command("apt install -y btop")
         logg("btop installed successfully.", GREEN)
     except Exception as e:
         logg(f"Error installing btop: {e}", RED)
@@ -311,7 +311,7 @@ def install_lazygit():
         logg(f"Downloading LazyGit v{lazygit_version}...", BLUE)
         run_command(f"curl -Lo lazygit.tar.gz {url}")
         run_command("tar xf lazygit.tar.gz lazygit")
-        run_command("sudo install lazygit -D -t /usr/local/bin/")
+        run_command("install lazygit -D -t /usr/local/bin/")
         run_command("rm lazygit lazygit.tar.gz")
         logg("LazyGit installed successfully.", GREEN)
     except Exception as e:
