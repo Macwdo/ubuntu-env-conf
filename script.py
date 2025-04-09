@@ -1,334 +1,361 @@
-#!/usr/bin/env python3
 import os
 import re
 import subprocess
 import sys
 import shutil
-import time
 
-# Códigos de cores ANSI
-BLUE = "\033[94m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-RESET = "\033[0m"
+from constants import (
+    GREEN,
+    BLUE,
+    RED,
+    YELLOW,
+    RESET,
+)
+from utils import logg, run_command, get_user_home
 
-import atexit
-import signal
-import subprocess
-import threading
 
-def keep_sudo_alive():
-    """Mantém a sessão sudo viva em background"""
-    def run():
-        try:
-            while True:
-                subprocess.run(["sudo", "-v"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(60)
-        except:
-            pass
-
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-
-def request_sudo():
-    """Solicita sudo uma vez no início e mantém a sessão ativa"""
+def clone_repo(repo_url, dest):
+    """
+    Clone a git repository to the destination directory only if not already present.
+    """
+    if os.path.exists(dest) and os.listdir(dest):
+        logg(f"Repository already exists at {dest}. Skipping clone.", YELLOW)
+        return
+    logg(f"Starting clone of repository {repo_url} to {dest}...", BLUE)
     try:
-        subprocess.run(["sudo", "-v"], check=True)
-        keep_sudo_alive()
-        atexit.register(lambda: subprocess.run(["sudo", "-k"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-    except subprocess.CalledProcessError:
-        log("Falha ao obter acesso sudo. Encerrando...", RED)
-        exit(1)
+        run_command(f"git clone {repo_url} {dest}")
+        logg(f"Repository cloned to {dest}.", GREEN)
+    except Exception as e:
+        logg(f"Error cloning repository {repo_url}: {e}", RED)
 
-def log(message, color=BLUE):
-    print(f"{color}{message}{RESET}")
-
-def run_command(cmd, env=None):
-    log(f"Executando: {cmd}", GREEN)
-    subprocess.run(cmd, shell=True, check=True, env=env)
 
 def update_upgrade():
-    log("Passo: Atualizando e atualizando pacotes...", BLUE)
-    run_command("sudo apt update -y")
-    run_command("sudo apt upgrade -y")
+    logg("Starting update and upgrade of packages...", BLUE)
+    try:
+        # Check if apt update/upgrade are needed (could parse output, for now always run)
+        run_command("sudo apt update -y")
+        run_command("sudo apt upgrade -y")
+        logg("Packages updated and upgraded successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error during update/upgrade: {e}", RED)
+
 
 def install_packages():
-    log("Passo: Instalando pacotes essenciais...", BLUE)
+    logg("Starting installation of essential packages...", BLUE)
     apt_packages = (
         "build-essential curl libbz2-dev libffi-dev liblzma-dev libncursesw5-dev "
         "libreadline-dev libsqlite3-dev libssl-dev libxml2-dev libxmlsec1-dev llvm "
         "make tk-dev wget xz-utils zlib1g-dev"
     )
-    run_command(f"sudo apt install -y {apt_packages}")
+    try:
+        # We could check if dpkg -l shows these packages but here we assume idempotence
+        run_command(f"sudo apt install -y {apt_packages}")
+        logg("Essential packages installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing essential packages: {e}", RED)
+
 
 def install_basic_tools():
-    log("Passo: Instalando ferramentas básicas...", BLUE)
-    run_command("sudo apt install -y zsh git wget curl unzip")
+    logg("Starting installation of basic tools...", BLUE)
+    try:
+        run_command("sudo apt install -y zsh git wget curl unzip")
+        logg("Basic tools installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing basic tools: {e}", RED)
+
 
 def change_default_shell():
-    log("Passo: Alterando shell padrão para zsh...", BLUE)
+    logg("Starting change of default shell to zsh...", BLUE)
     try:
-        subprocess.run("chsh -s $(which zsh)", shell=True, check=True, timeout=10)
+        # Check if the shell is already zsh
+        current_shell = os.environ.get("SHELL", "")
+        if "zsh" in current_shell:
+            logg("Default shell is already zsh. Skipping change.", YELLOW)
+            return
+        subprocess.run(
+            "chsh -s $(which zsh)",
+            shell=True,
+            check=True,
+            timeout=10,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logg("Default shell changed to zsh successfully.", GREEN)
     except subprocess.TimeoutExpired:
-        log("chsh travou. Por favor, altere o shell manualmente com 'chsh -s $(which zsh)'", YELLOW)
+        logg(
+            "chsh timed out. Please change the shell manually with 'chsh -s $(which zsh)'.",
+            YELLOW,
+        )
     except KeyboardInterrupt:
-        log("Alteração de shell cancelada pelo usuário. Execute 'chsh -s $(which zsh)' manualmente se desejar.", YELLOW)
+        logg(
+            "Shell change canceled by user. Run 'chsh -s $(which zsh)' manually if desired.",
+            YELLOW,
+        )
     except subprocess.CalledProcessError as e:
-        log(f"Falha ao alterar shell: {e}", RED)
+        logg(f"Error while changing shell: {e}", RED)
+    except Exception as e:
+        logg(f"Unexpected error while changing shell: {e}", RED)
+
 
 def install_oh_my_zsh():
-    log("Passo: Instalando Oh My Zsh...", BLUE)
-    home = os.path.expanduser("~")
-    ohmyzsh_dir = os.path.join(home, ".oh-my-zsh")
-    if os.path.exists(ohmyzsh_dir):
-        log("O diretório do Oh My Zsh já existe. Pulando instalação.", YELLOW)
-        return
+    logg("Starting installation of Oh My Zsh...", BLUE)
+    try:
+        home = get_user_home()
+        ohmyzsh_dir = os.path.join(home, ".oh-my-zsh")
+        if os.path.exists(ohmyzsh_dir):
+            logg("Oh My Zsh directory already exists. Skipping installation.", YELLOW)
+            return
+        env = os.environ.copy()
+        env["RUNZSH"] = "no"
+        env["CHSH"] = "no"
+        run_command(
+            'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"',
+            env=env,
+        )
+        logg("Oh My Zsh installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing Oh My Zsh: {e}", RED)
 
-    env = os.environ.copy()
-    env["RUNZSH"] = "no"
-    env["CHSH"] = "no"
-    run_command('sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"', env=env)
 
-def clone_repo(repo_url, dest):
-    if os.path.exists(dest):
-        log(f"O diretório {dest} já existe, pulando clone.", YELLOW)
-    else:
-        run_command(f"git clone {repo_url} {dest}")
+def install_zsh_plugins():
+    logg("Starting configuration of Zsh plugins...", BLUE)
+    try:
+        home = get_user_home()
+        custom_plugins_dir = os.path.join(home, ".oh-my-zsh", "custom", "plugins")
+        os.makedirs(custom_plugins_dir, exist_ok=True)
 
-def setup_zsh_plugins():
-    log("Passo: Configurando plugins do Zsh...", BLUE)
-    home = os.path.expanduser("~")
-    custom_plugins_dir = os.path.join(home, ".oh-my-zsh", "custom", "plugins")
-    os.makedirs(custom_plugins_dir, exist_ok=True)
+        plugins = {
+            "zsh-autosuggestions": "https://github.com/zsh-users/zsh-autosuggestions.git",
+            "zsh-syntax-highlighting": "https://github.com/zsh-users/zsh-syntax-highlighting.git",
+        }
 
-    plugins = {
-        "zsh-autosuggestions": "https://github.com/zsh-users/zsh-autosuggestions.git",
-        "zsh-syntax-highlighting": "https://github.com/zsh-users/zsh-syntax-highlighting.git"
-    }
+        for name, repo_url in plugins.items():
+            dest = os.path.join(custom_plugins_dir, name)
+            if os.path.isdir(dest) and os.listdir(dest):
+                logg(f"Plugin '{name}' already installed. Skipping.", YELLOW)
+            else:
+                try:
+                    run_command(f"git clone {repo_url} {dest}")
+                    logg(f"Plugin '{name}' installed successfully.", GREEN)
+                except Exception as e:
+                    logg(f"Error cloning plugin '{name}': {e}", RED)
+        logg("Zsh plugins configured successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error configuring Zsh plugins: {e}", RED)
 
-    for name, repo_url in plugins.items():
-        dest = os.path.join(custom_plugins_dir, name)
-        if os.path.isdir(dest):
-            log(f"Plugin {name} já instalado, pulando.", YELLOW)
-        else:
-            try:
-                run_command(f"git clone {repo_url} {dest}")
-                log(f"Plugin {name} instalado com sucesso.", GREEN)
-            except subprocess.CalledProcessError:
-                log(f"Erro ao clonar o plugin {name}.", RED)
-
-def setup_asdf():
-    log("Passo: Instalando asdf...", BLUE)
-    home = os.path.expanduser("~")
-    asdf_dir = os.path.join(home, ".asdf")
-    if os.path.exists(asdf_dir):
-        log("asdf já está instalado, pulando clone.", YELLOW)
-    else:
-        run_command("git clone https://github.com/asdf-vm/asdf.git ~/.asdf")
-
-def update_zshrc():
-    log("Passo: Atualizando .zshrc com plugins e tema...", BLUE)
-    home = os.path.expanduser("~")
-    zshrc = os.path.join(home, ".zshrc")
-    plugins_line = "plugins=( git docker docker-compose python celery zsh-autosuggestions zsh-syntax-highlighting )"
-    theme_line = 'ZSH_THEME="powerlevel10k/powerlevel10k"'
-    added = False
-    if os.path.exists(zshrc):
-        with open(zshrc, "r") as f:
-            contents = f.read()
-        if plugins_line not in contents:
-            with open(zshrc, "a") as f:
-                f.write("\n# Plugins adicionados automaticamente\n")
-                f.write(plugins_line + "\n")
-            added = True
-        if theme_line not in contents:
-            with open(zshrc, "a") as f:
-                f.write("\n# Tema adicionado automaticamente\n")
-                f.write(theme_line + "\n")
-            added = True
-    else:
-        with open(zshrc, "w") as f:
-            f.write(plugins_line + "\n")
-            f.write(theme_line + "\n")
-        added = True
-    if added:
-        log("Arquivo .zshrc atualizado.", GREEN)
-    else:
-        log("Arquivo .zshrc já estava configurado.", YELLOW)
 
 def install_powerlevel10k():
-    log("Passo: Instalando Powerlevel10k...", BLUE)
-    home = os.path.expanduser("~")
-    omz_custom = os.path.join(home, ".oh-my-zsh", "custom")
-    themes_dir = os.path.join(omz_custom, "themes")
-    os.makedirs(themes_dir, exist_ok=True)
-    dest = os.path.join(themes_dir, "powerlevel10k")
-    clone_repo("https://github.com/romkatv/powerlevel10k.git --depth=1", dest)
-
-def configure_powerlevel10k_theme():
-    """
-    Define o tema do Zsh no arquivo .zshrc para usar o Powerlevel10k.
-    Essa função verifica se já existe uma linha começando com ZSH_THEME= e a substitui,
-    ou adiciona a linha ao final do arquivo.
-    """
-    log("Passo: Configurando o tema Powerlevel10k no .zshrc...", BLUE)
-    home = os.path.expanduser("~")
-    zshrc_path = os.path.join(home, ".zshrc")
-    theme_line = 'ZSH_THEME="powerlevel10k/powerlevel10k"'
+    logg("Starting installation of Powerlevel10k...", BLUE)
     try:
-        # Se o .zshrc já existir, lê as linhas
-        if os.path.exists(zshrc_path):
-            with open(zshrc_path, "r") as f:
-                lines = f.readlines()
-            found = False
-            # Atualiza a linha que define o tema ou adiciona ao final
-            for i, line in enumerate(lines):
-                if line.startswith("ZSH_THEME="):
-                    lines[i] = theme_line + "\n"
-                    found = True
-                    break
-            if not found:
-                lines.append("\n" + theme_line + "\n")
-            with open(zshrc_path, "w") as f:
-                f.writelines(lines)
-            log("Tema Powerlevel10k configurado no .zshrc com sucesso.", GREEN)
+        home = get_user_home()
+        omz_custom = os.path.join(home, ".oh-my-zsh", "custom")
+        themes_dir = os.path.join(omz_custom, "themes")
+        os.makedirs(themes_dir, exist_ok=True)
+        dest = os.path.join(themes_dir, "powerlevel10k")
+        if os.path.exists(dest) and os.listdir(dest):
+            logg("Powerlevel10k is already installed. Skipping.", YELLOW)
         else:
-            with open(zshrc_path, "w") as f:
-                f.write(theme_line + "\n")
-            log("Arquivo .zshrc criado e tema Powerlevel10k configurado com sucesso.", GREEN)
+            clone_repo("https://github.com/romkatv/powerlevel10k.git --depth=1", dest)
+        logg("Powerlevel10k installed successfully.", GREEN)
     except Exception as e:
-        log(f"Erro ao configurar o tema Powerlevel10k: {e}", RED)
+        logg(f"Error installing Powerlevel10k: {e}", RED)
+
 
 def install_fonts():
-    log("Passo: Instalando fontes (Nerd Fonts e JetBrains Mono)...", BLUE)
-    home = os.path.expanduser("~")
-    fonts_dir = os.path.join(home, ".local", "share", "fonts")
-    os.makedirs(fonts_dir, exist_ok=True)
-    
-    fonts = {
-        "MesloLGS NF Regular.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf",
-        "MesloLGS NF Bold.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold.ttf",
-        "MesloLGS NF Italic.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Italic.ttf",
-        "MesloLGS NF Bold Italic.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold%20Italic.ttf"
-    }
-    for filename, url in fonts.items():
-        dest_file = os.path.join(fonts_dir, filename)
-        if os.path.exists(dest_file):
-            log(f"Fonte {filename} já instalada, pulando.", YELLOW)
-        else:
-            run_command(f"wget -O \"{dest_file}\" \"{url}\"")
-    run_command("fc-cache -fv")
-    
-    # Instala a fonte JetBrains Mono
-    jetbrains_zip = os.path.join("/tmp", "jetbrains-mono.zip")
-    jetbrains_url = "https://download.jetbrains.com/fonts/JetBrainsMono-2.242.zip"
-    run_command(f"wget -O {jetbrains_zip} \"{jetbrains_url}\"")
-    extract_dir = os.path.join("/tmp", "jetbrains-mono")
-    os.makedirs(extract_dir, exist_ok=True)
-    run_command(f"unzip -o {jetbrains_zip} -d {extract_dir}")
-    for root, dirs, files in os.walk(extract_dir):
-        for file in files:
-            if file.lower().endswith((".ttf", ".otf")):
-                full_path = os.path.join(root, file)
-                shutil.copy(full_path, fonts_dir)
-    run_command("fc-cache -fv")
+    logg("Starting installation of fonts (Nerd Fonts and JetBrains Mono)...", BLUE)
+    try:
+        home = get_user_home()
+        fonts_dir = os.path.join(home, ".local", "share", "fonts")
+        os.makedirs(fonts_dir, exist_ok=True)
+
+        fonts = {
+            "MesloLGS NF Regular.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf",
+            "MesloLGS NF Bold.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold.ttf",
+            "MesloLGS NF Italic.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Italic.ttf",
+            "MesloLGS NF Bold Italic.ttf": "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold%20Italic.ttf",
+        }
+        for filename, url in fonts.items():
+            dest_file = os.path.join(fonts_dir, filename)
+            if os.path.exists(dest_file):
+                logg(f"Font '{filename}' already installed. Skipping.", YELLOW)
+            else:
+                run_command(f'wget -O "{dest_file}" "{url}"')
+                logg(f"Font '{filename}' downloaded successfully.", GREEN)
+        run_command("fc-cache -fv")
+        logg("Font cache updated for Nerd Fonts.", GREEN)
+
+        # Install JetBrains Mono font
+        jetbrains_zip = os.path.join("/tmp", "jetbrains-mono.zip")
+        jetbrains_url = "https://download.jetbrains.com/fonts/JetBrainsMono-2.242.zip"
+        run_command(f'wget -O {jetbrains_zip} "{jetbrains_url}"')
+        extract_dir = os.path.join("/tmp", "jetbrains-mono")
+        os.makedirs(extract_dir, exist_ok=True)
+        run_command(f"unzip -o {jetbrains_zip} -d {extract_dir}")
+        for root, _, files in os.walk(extract_dir):
+            for file in files:
+                if file.lower().endswith((".ttf", ".otf")):
+                    full_path = os.path.join(root, file)
+                    shutil.copy(full_path, fonts_dir)
+                    logg(f"Copied font '{file}' to fonts directory.", BLUE)
+        run_command("fc-cache -fv")
+        logg("Font cache updated for JetBrains Mono.", GREEN)
+    except Exception as e:
+        logg(f"Error installing fonts: {e}", RED)
+
 
 def install_docker():
-    log("Passo: Instalando Docker...", BLUE)
-    run_command("sudo apt install -y docker.io")
-    run_command("sudo systemctl enable --now docker")
-    run_command("sudo usermod -aG docker $USER")
-    log("Docker instalado. Faça logout/login para aplicar as mudanças.", GREEN)
+    logg("Starting installation of Docker...", BLUE)
+    try:
+        # A deeper check could be done (e.g. check if docker daemon is running)
+        run_command("sudo apt install -y docker.io")
+        run_command("sudo systemctl enable --now docker")
+        run_command("sudo usermod -aG docker $USER")
+        logg(
+            "Docker installed successfully. Please log out/in to apply changes.", GREEN
+        )
+    except Exception as e:
+        logg(f"Error installing Docker: {e}", RED)
 
-def update_rust_env():
-    log("Passo: Atualizando ambiente do Rust...", BLUE)
-    rust_bin = os.path.expanduser("~/.cargo/bin")
-    if os.path.isdir(rust_bin):
-        os.environ["PATH"] = f"{rust_bin}:" + os.environ["PATH"]
-        log("Ambiente do Rust atualizado.", GREEN)
-    else:
-        log("Diretório do Rust não encontrado. Verifique a instalação.", RED)
+
+def install_aws_cli():
+    logg("Starting installation of AWS CLI...", BLUE)
+    try:
+        run_command(
+            'curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"'
+        )
+        run_command("unzip awscliv2.zip")
+        run_command("sudo ./aws/install")
+        run_command("rm awscliv2.zip")
+        run_command("rm -rf aws")
+        logg("AWS CLI installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing AWS CLI: {e}", RED)
+
+
+def _update_rust_env():
+    logg("Starting update of Rust environment...", BLUE)
+    try:
+        rust_bin = os.path.expanduser("~/.cargo/bin")
+        if os.path.isdir(rust_bin):
+            os.environ["PATH"] = f"{rust_bin}:" + os.environ["PATH"]
+            logg("Rust environment updated successfully.", GREEN)
+        else:
+            logg("Rust directory not found. Check the installation.", RED)
+    except Exception as e:
+        logg(f"Error updating Rust environment: {e}", RED)
+
 
 def install_rust():
-    log("Passo: Instalando Rust...", BLUE)
-    run_command("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y")
-    update_rust_env()
-    run_command("cargo install exa bat")
+    logg("Starting installation of Rust...", BLUE)
+    try:
+        run_command(
+            "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+        )
+        _update_rust_env()
+        run_command("cargo install exa bat")
+        logg("Rust and additional packages (exa, bat) installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing Rust: {e}", RED)
+
 
 def install_uv():
-    log("Passo: Instalando UV (depende do Rust)...", BLUE)
-    run_command("cargo install --git https://github.com/astral-sh/uv uv")
+    logg("Starting installation of UV (requires Rust)...", BLUE)
+    try:
+        run_command("cargo install --git https://github.com/astral-sh/uv uv")
+        logg("UV installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing UV: {e}", RED)
+
 
 def install_node_pnpm():
-    log("Passo: Instalando Node.js, npm e pnpm...", BLUE)
-    run_command("sudo apt install -y nodejs npm")
-    run_command("sudo npm install -g pnpm")
+    logg("Starting installation of Node.js, npm, and pnpm...", BLUE)
+    try:
+        run_command("sudo apt install -y nodejs npm")
+        run_command("sudo npm install -g pnpm")
+        logg("Node.js, npm, and pnpm installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing Node.js, npm, or pnpm: {e}", RED)
+
 
 def install_golang():
-    log("Passo: Instalando Golang...", BLUE)
-    run_command("sudo apt install -y golang-go")
+    logg("Starting installation of Golang...", BLUE)
+    try:
+        run_command("sudo apt install -y golang-go")
+        logg("Golang installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing Golang: {e}", RED)
+
 
 def install_btop():
-    log("Passo: Instalando btop...", BLUE)
-    run_command("sudo apt install -y btop")
+    logg("Starting installation of btop...", BLUE)
+    try:
+        run_command("sudo apt install -y btop")
+        logg("btop installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing btop: {e}", RED)
+
 
 def install_lazygit():
-    log("Passo: Instalando LazyGit...", BLUE)
+    logg("Starting installation of LazyGit...", BLUE)
     try:
-        # Obtém o JSON da release mais recente
         version_json = subprocess.check_output(
             'curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest"',
-            shell=True
+            shell=True,
         ).decode()
-        # Extrai exatamente como no comando grep -Po '"tag_name": *"v\K[^"]*'
         match = re.search(r'"tag_name":\s*"v?([^"]+)"', version_json)
         if not match:
-            raise RuntimeError("Não foi possível extrair a versão do LazyGit.")
+            logg("Error: Unable to find LazyGit version.", RED)
+
         lazygit_version = match.group(1)
-        # Constrói a URL
         url = f"https://github.com/jesseduffield/lazygit/releases/download/v{lazygit_version}/lazygit_{lazygit_version}_Linux_x86_64.tar.gz"
-        log(f"Baixando LazyGit v{lazygit_version}...", BLUE)
-        # Executa os comandos
+        logg(f"Downloading LazyGit v{lazygit_version}...", BLUE)
         run_command(f"curl -Lo lazygit.tar.gz {url}")
         run_command("tar xf lazygit.tar.gz lazygit")
         run_command("sudo install lazygit -D -t /usr/local/bin/")
         run_command("rm lazygit lazygit.tar.gz")
-        log("LazyGit instalado com sucesso!", BLUE)
+        logg("LazyGit installed successfully.", GREEN)
     except Exception as e:
-        log(f"Erro ao instalar LazyGit: {e}", RED)
+        logg(f"Error installing LazyGit: {e}", RED)
+
 
 def install_lazydocker():
-    log("Passo: Instalando lazydocker...", BLUE)
-    run_command("curl -s https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash")
+    logg("Starting installation of lazydocker...", BLUE)
+    try:
+        run_command(
+            "curl -s https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash"
+        )
+        logg("lazydocker installed successfully.", GREEN)
+    except Exception as e:
+        logg(f"Error installing lazydocker: {e}", RED)
+
 
 def configure_aliases():
-    log("Passo: Configurando aliases para exa e bat...", BLUE)
-    home = os.path.expanduser("~")
-    zshrc = os.path.join(home, ".zshrc")
-    aliases = [
-        "alias ls='exa --icons'",
-        "alias cat='bat'"
-    ]
+    logg("Starting configuration of aliases for exa and bat...", BLUE)
     try:
+        home = get_user_home()
+        zshrc = os.path.join(home, ".zshrc")
+        aliases = ["alias ls='exa --icons'", "alias cat='bat'"]
         if not os.path.exists(zshrc):
-            open(zshrc, 'w').close()  # cria .zshrc se não existir
-        with open(zshrc, 'r') as file:
+            open(zshrc, "w").close()
+            logg("Created new .zshrc file.", BLUE)
+        with open(zshrc, "r") as file:
             content = file.read()
-        with open(zshrc, 'a') as file:
+        with open(zshrc, "a") as file:
             for alias in aliases:
                 if alias not in content:
                     file.write(f"\n{alias}")
-        log("Aliases adicionados com sucesso ao .zshrc ✅", GREEN)
+                    logg(f"Alias added: {alias}", BLUE)
+        logg("Aliases configured successfully in .zshrc.", GREEN)
     except Exception as e:
-        log(f"Erro ao configurar aliases: {e}", RED)
+        logg(f"Error configuring aliases: {e}", RED)
+
 
 def set_powerlevel10k_theme():
-    log("Passo: Configurando o tema Powerlevel10k no .zshrc...", BLUE)
-    home = os.path.expanduser("~")
-    zshrc_path = os.path.join(home, ".zshrc")
-    theme_line = 'ZSH_THEME="powerlevel10k/powerlevel10k"'
+    logg("Starting configuration of Powerlevel10k theme in .zshrc...", BLUE)
     try:
+        home = get_user_home()
+        zshrc_path = os.path.join(home, ".zshrc")
+        theme_line = 'ZSH_THEME="powerlevel10k/powerlevel10k"'
         if os.path.exists(zshrc_path):
             with open(zshrc_path, "r") as f:
                 lines = f.readlines()
@@ -342,20 +369,24 @@ def set_powerlevel10k_theme():
                 lines.append("\n" + theme_line + "\n")
             with open(zshrc_path, "w") as f:
                 f.writelines(lines)
-            log("Tema Powerlevel10k configurado no .zshrc com sucesso.", GREEN)
+            logg("Powerlevel10k theme configured in .zshrc successfully.", GREEN)
         else:
             with open(zshrc_path, "w") as f:
                 f.write(theme_line + "\n")
-            log("Arquivo .zshrc criado e tema Powerlevel10k configurado com sucesso.", GREEN)
+            logg(
+                ".zshrc file created and Powerlevel10k theme configured successfully.",
+                GREEN,
+            )
     except Exception as e:
-        log(f"Erro ao configurar o tema Powerlevel10k: {e}", RED)
+        logg(f"Error configuring Powerlevel10k theme: {e}", RED)
+
 
 def set_zsh_plugins():
-    log("Passo: Configurando plugins no .zshrc...", BLUE)
-    home = os.path.expanduser("~")
-    zshrc_path = os.path.join(home, ".zshrc")
-    plugins_line = "plugins=( git docker docker-compose python celery zsh-autosuggestions zsh-syntax-highlighting )"
+    logg("Starting configuration of plugins in .zshrc...", BLUE)
     try:
+        home = get_user_home()
+        zshrc_path = os.path.join(home, ".zshrc")
+        plugins_line = "plugins=( git docker docker-compose python celery zsh-autosuggestions zsh-syntax-highlighting )"
         if os.path.exists(zshrc_path):
             with open(zshrc_path, "r") as f:
                 lines = f.readlines()
@@ -369,55 +400,45 @@ def set_zsh_plugins():
                 lines.append("\n" + plugins_line + "\n")
             with open(zshrc_path, "w") as f:
                 f.writelines(lines)
-            log("Plugins configurados no .zshrc com sucesso.", GREEN)
+            logg("Plugins configured in .zshrc successfully.", GREEN)
         else:
             with open(zshrc_path, "w") as f:
                 f.write(plugins_line + "\n")
-            log("Arquivo .zshrc criado e plugins configurados com sucesso.", GREEN)
+            logg(".zshrc file created and plugins configured successfully.", GREEN)
     except Exception as e:
-        log(f"Erro ao configurar plugins no .zshrc: {e}", RED)
+        logg(f"Error configuring plugins in .zshrc: {e}", RED)
 
 
 def main():
+    logg("Starting full configuration...", BLUE)
     try:
-        request_sudo()
-        
         update_upgrade()
-        
         install_packages()
         install_basic_tools()
-        
         change_default_shell()
-        
         install_oh_my_zsh()
-        
-        setup_zsh_plugins()
-        setup_asdf()
-        
-        update_zshrc()
-        
+        install_zsh_plugins()
         install_powerlevel10k()
         install_fonts()
-        install_docker()
-        
+        # Uncomment if Docker installation is required
+        # install_docker()
+        install_aws_cli()
         install_rust()
         install_node_pnpm()
         install_golang()
-        
         install_uv()
-        
         install_btop()
-        
         install_lazygit()
         install_lazydocker()
-        
         configure_aliases()
-        
-        set_zsh_plugins()  
-        set_powerlevel10k_theme()  # Função para setar o tema no .zshrc
-        log("Configuração concluída com sucesso!", GREEN)
+        set_zsh_plugins()
+        set_powerlevel10k_theme()
+        logg("Configuration completed successfully!", GREEN)
     except subprocess.CalledProcessError as e:
-        log(f"Ocorreu um erro ao executar o comando: {e.cmd}", RED)
+        logg(f"An error occurred while executing a command: {e.cmd}", RED)
+        sys.exit(1)
+    except Exception as e:
+        logg(f"Configuration failed: {e}", RED)
         sys.exit(1)
 
 
